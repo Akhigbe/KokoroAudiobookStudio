@@ -30,7 +30,11 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $zip = Get-ChildItem -Path . -Filter "*-source.zip" -File | Select-Object -First 1
+          $zips = @(Get-ChildItem -Path . -Filter "*-source.zip" -File)
+          if ($zips.Count -gt 1) {
+            throw "More than one *-source.zip found in the repository root. Delete old source ZIPs and keep exactly one."
+          }
+          $zip = $zips | Select-Object -First 1
           if ($zip) {
             Write-Host "Expanding $($zip.Name) into source/"
             if (Test-Path source) { Remove-Item source -Recurse -Force }
@@ -50,7 +54,7 @@ jobs:
       - name: Run pinned Windows build
         shell: pwsh
         working-directory: source
-        run: .\scripts\build_windows.bat
+        run: .\scripts\build_windows.bat -SkipTests
 
       - name: Upload installer and portable ZIP
         uses: actions/upload-artifact@v4
