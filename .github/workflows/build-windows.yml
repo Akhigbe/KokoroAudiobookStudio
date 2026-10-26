@@ -30,25 +30,43 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $zips = @(Get-ChildItem -Path . -Filter "*-source.zip" -File)
+
+          # Find a source ZIP anywhere in the repository, not just the root.
+          $zips = @(Get-ChildItem -Path . -Filter "*-source.zip" -File -Recurse -ErrorAction SilentlyContinue |
+                    Where-Object { $_.FullName -notmatch "[\\/]source[\\/]" })
           if ($zips.Count -gt 1) {
-            throw "More than one *-source.zip found in the repository root. Delete old source ZIPs and keep exactly one."
+            Write-Host "Found more than one source ZIP:"
+            $zips | ForEach-Object { Write-Host " - $($_.FullName)" }
+            throw "Keep exactly one *-source.zip in the repository. Delete old ZIPs and rerun."
           }
           $zip = $zips | Select-Object -First 1
+
           if ($zip) {
-            Write-Host "Expanding $($zip.Name) into source/"
+            Write-Host "Expanding $($zip.FullName) into source/"
             if (Test-Path source) { Remove-Item source -Recurse -Force }
             Expand-Archive -Path $zip.FullName -DestinationPath source -Force
           } else {
-            Write-Host "No source ZIP found; using repository root files."
-            if (Test-Path source) { Remove-Item source -Recurse -Force }
-            New-Item -ItemType Directory -Path source | Out-Null
-            Get-ChildItem -Force | Where-Object {
-              $_.Name -notin @("source", ".git")
-            } | Copy-Item -Destination source -Recurse -Force
+            Write-Host "No source ZIP found; looking for extracted source files."
+            $bat = Get-ChildItem -Path . -Filter "build_windows.bat" -File -Recurse -ErrorAction SilentlyContinue |
+                   Where-Object { $_.FullName -like "*\scripts\build_windows.bat" } |
+                   Select-Object -First 1
+            if ($bat) {
+              $sourceDir = Split-Path (Split-Path $bat.FullName -Parent) -Parent
+              Write-Host "Using extracted source folder: $sourceDir"
+              if (Test-Path source) { Remove-Item source -Recurse -Force }
+              New-Item -ItemType Directory -Path source | Out-Null
+              Copy-Item -Path (Join-Path $sourceDir "*") -Destination source -Recurse -Force
+            } else {
+              Write-Host "Repository root contains:"
+              Get-ChildItem -Force | Select-Object Name, Mode | Format-Table | Out-String | Write-Host
+              throw "No *-source.zip and no scripts\\build_windows.bat found. Upload KokoroAudiobookStudio-0.1.0-source.zip to the repository root, then rerun the workflow."
+            }
           }
+
           if (-not (Test-Path "source\scripts\build_windows.bat")) {
-            throw "source\scripts\build_windows.bat was not found. Upload the source ZIP or extracted files correctly."
+            Write-Host "Prepared source folder contains:"
+            Get-ChildItem -Path source -Force | Select-Object Name, Mode | Format-Table | Out-String | Write-Host
+            throw "source\scripts\build_windows.bat is missing. The uploaded ZIP is not the Kokoro source ZIP."
           }
 
       - name: Run pinned Windows build
